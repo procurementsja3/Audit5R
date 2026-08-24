@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Audit Gemba 5R (Cloud)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Hide scrollbar for horizontal image lists */
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        
+        body { 
+            background-color: #f8fafc;
+            font-family: 'Inter', sans-serif; 
+            margin: 0;
+        }
+        
+        #app-container {
+            width: 100%;
+            background-color: #f8fafc;
+            height: 100vh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(100%);
+        }
+        .modal.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+
+        /* Toast notification */
+        #toast {
+            transition: opacity 0.3s ease, bottom 0.3s ease;
+        }
+        
+        /* Spinner */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 24px;
+            height: 24px;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="app-container" class="flex flex-col h-screen">
+    
+    <header class="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-md">
+        <div class="flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-wide flex items-center">
+                <i class="fa-solid fa-clipboard-check mr-2"></i> Audit 5R
+                <span id="sync-status" class="ml-2 text-xs bg-blue-500 px-2 py-0.5 rounded-full flex items-center hidden">
+                    <span class="w-2 h-2 bg-green-300 rounded-full mr-1 animate-pulse"></span> Online
+                </span>
+            </h1>
+            <div class="flex gap-4">
+                <button onclick="window.shareApp()" class="text-blue-100 hover:text-white" title="Bagikan Aplikasi">
+                    <i class="fa-solid fa-share-nodes"></i>
+                </button>
+                <button onclick="window.resetData()" class="text-blue-200 hover:text-red-300 text-sm" title="Hapus Semua Data">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex bg-white shadow-sm border-b text-sm">
+        <button id="tab-open" onclick="window.switchTab('open')" class="flex-1 py-3 px-1 text-center font-semibold text-blue-600 border-b-2 border-blue-600 transition-colors whitespace-nowrap">
+            Terbuka <span id="count-open" class="ml-1 bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.5 rounded-full">0</span>
+        </button>
+        <button id="tab-closed" onclick="window.switchTab('closed')" class="flex-1 py-3 px-1 text-center font-semibold text-gray-500 border-b-2 border-transparent hover:text-blue-500 transition-colors whitespace-nowrap">
+            Selesai <span id="count-closed" class="ml-1 bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-full">0</span>
+        </button>
+        <button id="tab-resume" onclick="window.switchTab('resume')" class="flex-1 py-3 px-1 text-center font-semibold text-gray-500 border-b-2 border-transparent hover:text-blue-500 transition-colors whitespace-nowrap">
+            <i class="fa-solid fa-chart-pie mr-1"></i> Resume
+        </button>
+    </div>
+
+    <main class="flex-1 overflow-y-auto p-4 pb-24 bg-gray-50" id="main-content">
+        
+        <!-- Loading State -->
+        <div id="loading-state" class="flex flex-col items-center justify-center h-32 text-gray-500">
+            <div class="loader mb-3"></div>
+            <p class="text-sm">Menyinkronkan data...</p>
+        </div>
+
+        <!-- Open Findings List -->
+        <div id="list-open" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
+            <!-- Items injected by JS -->
+        </div>
+
+        <!-- Closed Findings List -->
+        <div id="list-closed" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
+            <!-- Items injected by JS -->
+        </div>
+
+        <!-- Resume List -->
+        <div id="list-resume" class="md:max-w-3xl md:mx-auto w-full hidden pb-10">
+            <!-- Items injected by JS -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="hidden flex flex-col items-center justify-center h-64 text-gray-400">
+            <i class="fa-solid fa-folder-open text-6xl mb-4 opacity-50"></i>
+            <p class="text-lg">Belum ada data temuan.</p>
+            <p class="text-sm mt-1">Tap tombol + untuk menambah.</p>
+        </div>
+    </main>
+
+    <button onclick="window.openModal('add-modal')" class="fixed bottom-8 right-8 md:bottom-12 md:right-12 bg-blue-600 text-white w-14 h-14 md:w-16 md:h-16 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-blue-700 transition-transform hover:scale-105 z-20">
+        <i class="fa-solid fa-plus"></i>
+    </button>
+
+    <div id="add-modal" class="modal absolute inset-0 bg-white z-30 flex flex-col h-full w-full mx-auto sm:shadow-2xl">
+        <header class="bg-white border-b p-4 flex justify-between items-center shadow-sm">
+            <h2 class="text-lg font-bold text-gray-800">Tambah Temuan 5R</h2>
+            <button onclick="window.closeModal('add-modal')" class="text-gray-500 hover:text-red-500 text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </header>
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-4">
+            <form id="add-form" onsubmit="window.handleFormSubmit(event, 'add')" class="max-w-2xl mx-auto">
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Area / Lokasi</label>
+                    <input type="text" id="add-location" required class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="Contoh: Gudang Bahan Baku">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Kategori 5R</label>
+                    <select id="add-category" required class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+                        <option value="" disabled selected>Pilih Kategori...</option>
+                        <option value="Seiri (Ringkas)">Seiri (Ringkas - Pisahkan yang tidak perlu)</option>
+                        <option value="Seiton (Rapi)">Seiton (Rapi - Susun pada tempatnya)</option>
+                        <option value="Seiso (Resik)">Seiso (Resik - Bersihkan area)</option>
+                        <option value="Seiketsu (Rawat)">Seiketsu (Rawat - Pertahankan standar)</option>
+                        <option value="Shitsuke (Rajin)">Shitsuke (Rajin - Disiplin kebiasaan)</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Deskripsi Temuan</label>
+                    <textarea id="add-description" required rows="3" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="Jelaskan kondisi yang ditemukan..."></textarea>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">Foto Temuan (Maksimal 3 Foto)</label>
+                    <div class="flex flex-wrap gap-3 mb-2" id="add-photo-list">
+                        <!-- Tombol Tambah Foto -->
+                        <button type="button" id="add-photo-btn" onclick="window.openPhotoOptions('add')" class="flex flex-col items-center justify-center w-24 h-24 border-2 border-dashed border-blue-300 rounded-lg cursor-pointer bg-blue-50 hover:bg-blue-100 transition-colors">
+                            <i class="fa-solid fa-camera text-2xl text-blue-500 mb-1"></i>
+                            <span class="text-[10px] text-gray-500 font-semibold text-center leading-tight">Tap / Upload</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-8 pb-4">
+                    <button id="add-submit-btn" type="submit" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 transition-colors flex justify-center items-center">
+                        Simpan Temuan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="close-modal" class="modal absolute inset-0 bg-white z-40 flex flex-col h-full w-full mx-auto sm:shadow-2xl">
+        <header class="bg-white border-b p-4 flex justify-between items-center shadow-sm">
+            <h2 class="text-lg font-bold text-gray-800">Close Temuan</h2>
+            <button onclick="window.closeModal('close-modal')" class="text-gray-500 hover:text-red-500 text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </header>
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-4">
+            <div class="max-w-2xl mx-auto">
+                <div class="bg-gray-100 p-3 rounded-lg text-sm mb-4 border border-gray-200">
+                    <p class="font-semibold text-gray-700" id="close-summary-location">Area</p>
+                    <p class="text-gray-600 italic mt-1" id="close-summary-desc">Deskripsi</p>
+                </div>
+
+                <form id="close-form" onsubmit="window.handleFormSubmit(event, 'close')">
+                    <input type="hidden" id="close-finding-id">
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Tindakan Perbaikan</label>
+                    <textarea id="close-action" required rows="3" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" placeholder="Jelaskan apa yang sudah dilakukan..."></textarea>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">Foto Sesudah Perbaikan (Maks. 3 Foto)</label>
+                    <div class="flex flex-wrap gap-3 mb-2" id="close-photo-list">
+                        <!-- Tombol Tambah Foto Close -->
+                        <button type="button" id="close-photo-btn" onclick="window.openPhotoOptions('close')" class="flex flex-col items-center justify-center w-24 h-24 border-2 border-dashed border-green-300 rounded-lg cursor-pointer bg-green-50 hover:bg-green-100 transition-colors">
+                            <i class="fa-solid fa-camera text-2xl text-green-500 mb-1"></i>
+                            <span class="text-[10px] text-gray-500 font-semibold text-center leading-tight">Tap / Upload</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-8 pb-4">
+                    <button id="close-submit-btn" type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-green-700 transition-colors flex justify-center items-center">
+                        Selesaikan Temuan (Close)
+                    </button>
+                </div>
+            </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="image-modal" class="modal absolute inset-0 bg-black bg-opacity-90 z-50 flex flex-col h-full w-full mx-auto justify-center items-center p-4">
+        <button onclick="window.closeModal('image-modal')" class="absolute top-4 right-4 text-white hover:text-gray-300 text-4xl z-50 p-2">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <img id="full-image-view" src="" class="max-w-full max-h-[80vh] object-contain rounded-lg">
+        <p id="full-image-caption" class="text-white mt-4 text-center px-4"></p>
+    </div>
+
+    <!-- Photo Options Modal (Action Sheet) -->
+    <div id="photo-options-modal" class="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-end justify-center hidden transition-opacity duration-300 opacity-0">
+        <div id="photo-options-content" class="bg-white w-full max-w-md rounded-t-2xl p-6 transform translate-y-full transition-transform duration-300">
+            <div class="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-5"></div>
+            <h3 class="text-lg font-bold text-center mb-5 text-gray-800">Pilih Sumber Foto</h3>
+            <div class="space-y-3">
+                <!-- Opsi Kamera Langsung -->
+                <label class="flex items-center w-full p-4 border rounded-xl cursor-pointer hover:bg-blue-50 active:bg-blue-100 transition-colors border-gray-200">
+                    <i class="fa-solid fa-camera text-2xl text-blue-500 w-10 text-center mr-3"></i>
+                    <div class="flex-1">
+                        <span class="block font-bold text-gray-800">Kamera</span>
+                        <span class="block text-xs text-gray-500">Ambil foto secara langsung</span>
+                    </div>
+                    <!-- Atribut capture="environment" akan memaksa HP membuka kamera belakang -->
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="window.handlePhotoSelectWrapper(event)">
+                </label>
+                
+                <!-- Opsi Galeri -->
+                <label class="flex items-center w-full p-4 border rounded-xl cursor-pointer hover:bg-green-50 active:bg-green-100 transition-colors border-gray-200">
+                    <i class="fa-solid fa-images text-2xl text-green-500 w-10 text-center mr-3"></i>
+                    <div class="flex-1">
+                        <span class="block font-bold text-gray-800">Galeri Foto</span>
+                        <span class="block text-xs text-gray-500">Pilih file dari penyimpanan</span>
+                    </div>
+                    <input type="file" accept="image/*" multiple class="hidden" onchange="window.handlePhotoSelectWrapper(event)">
+                </label>
+            </div>
+            <button type="button" onclick="window.closePhotoOptions()" class="w-full mt-4 p-3 font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Batal</button>
+        </div>
+    </div>
+
+    <!-- Global Toast -->
+    <div id="toast" class="absolute bottom-[-100px] left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg z-50 opacity-0 pointer-events-none whitespace-nowrap text-sm font-medium">
+        Notification message
+    </div>
+</div>
+
+<script>
+    // State Global aplikasi yang bisa diakses langsung tanpa menunggu Database
+    window.gembaState = {
+        findings: [],
+        currentTab: 'open',
+        isDataLoaded: false
+    };
+
+    window.pendingPhotos = {
+        add: [],
+        close: []
+    };
+
+    window.currentPhotoTarget = 'add'; // Menyimpan state untuk modal foto
+
+    let toastTimeout;
+    window.showToast = function(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.style.opacity = '1';
+        toast.style.bottom = '20px';
+        
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.bottom = '-100px';
+        }, 3000);
+    }
+
+    window.switchTab = function(tab) {
+        window.gembaState.currentTab = tab;
+        
+        const tabs = ['open', 'closed', 'resume'];
+        tabs.forEach(t => {
+            const el = document.getElementById('tab-' + t);
+            const listEl = document.getElementById('list-' + t);
+            
+            if (t === tab) {
+                el.classList.add('text-blue-600', 'border-blue-600');
+                el.classList.remove('text-gray-500', 'border-transparent');
+                if(window.gembaState.isDataLoaded && listEl) listEl.classList.remove('hidden');
+            } else {
+                el.classList.add('text-gray-500', 'border-transparent');
+                el.classList.remove('text-blue-600', 'border-blue-600');
+                if(listEl) listEl.classList.add('hidden');
+            }
+        });
+        window.renderFindings();
+    }
+
+    window.openModal = function(id) {
+        document.getElementById(id).classList.add('active');
+        document.body.style.overflow = 'hidden'; 
+    }
+
+    window.closeModal = function(id) {
+        document.getElementById(id).classList.remove('active');
+        document.body.style.overflow = '';
+        
+        if(id === 'add-modal') {
+            document.getElementById('add-form').reset();
+            window.resetPhotos('add');
+        } else if(id === 'close-modal') {
+            document.getElementById('close-form').reset();
+            window.resetPhotos('close');
+        }
+    }
+
+    // --- PHOTO OPTIONS ACTION SHEET LOGIC ---
+    window.openPhotoOptions = function(type) {
+        window.currentPhotoTarget = type;
+        const modal = document.getElementById('photo-options-modal');
+        const content = document.getElementById('photo-options-content');
+        
+        modal.classList.remove('hidden');
+        // Force reflow agar animasi berjalan mulus
+        void modal.offsetWidth; 
+        
+        modal.classList.remove('opacity-0');
+        content.classList.remove('translate-y-full');
+    }
+
+    window.closePhotoOptions = function() {
+        const modal = document.getElementById('photo-options-modal');
+        const content = document.getElementById('photo-options-content');
+        
+        modal.classList.add('opacity-0');
+        content.classList.add('translate-y-full');
+        
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 300); // Menunggu transisi selesai sebelum di-hide
+    }
+
+    window.handlePhotoSelectWrapper = function(event) {
+        window.handlePhotoSelect(event, window.currentPhotoTarget);
+        window.closePhotoOptions();
+    }
+    // ----------------------------------------
+
+    window.compressImage = function(file, callback) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Menurunkan resolusi maksimal agar aman untuk multiple-upload (1 MB limit Firestore)
+                const MAX_WIDTH = 500;
+                const MAX_HEIGHT = 500;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                } else {
+                    if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+                // Kompresi ketat: quality 0.4
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+                callback(dataUrl);
+            }
+            img.src = event.target.result;
+        }
+        reader.readAsDataURL(file);
+    }
+
+    window.handlePhotoSelect = function(event, type) {
+        const files = Array.from(event.target.files);
+        if (!files.length) return;
+        
+        const remainingAllowed = 3 - window.pendingPhotos[type].length;
+        const filesToProcess = files.slice(0, remainingAllowed);
+        
+        if (files.length > remainingAllowed) {
+            window.showToast(`Maksimal 3 foto. Hanya ${remainingAllowed} foto yang ditambahkan.`);
+        }
+
+        if (filesToProcess.length > 0) {
+            window.showToast("Memproses foto...");
+        }
+        
+        let processed = 0;
+        filesToProcess.forEach(file => {
+            window.compressImage(file, function(compressedDataUrl) {
+                window.pendingPhotos[type].push(compressedDataUrl);
+                processed++;
+                if (processed === filesToProcess.length) {
+                    window.renderPhotoPreviews(type);
+                }
+            });
+        });
+        
+        // Reset input agar bisa memfoto/pilih gambar yang sama lagi jika perlu
+        event.target.value = ''; 
+    }
+
+    window.renderPhotoPreviews = function(type) {
+        const listEl = document.getElementById(`${type}-photo-list`);
+        const btnEl = document.getElementById(`${type}-photo-btn`);
+        
+        // Bersihkan thumbnail yang sudah ada
+        Array.from(listEl.children).forEach(child => {
+            if (child.id !== `${type}-photo-btn`) listEl.removeChild(child);
+        });
+        
+        // Buat ulang thumbnail dari array
+        window.pendingPhotos[type].forEach((dataUrl, index) => {
+            const div = document.createElement('div');
+            div.className = "relative w-24 h-24 flex-shrink-0 animate-fade-in";
+            div.innerHTML = `
+                <img src="${dataUrl}" class="w-full h-full object-cover rounded-lg border border-gray-200">
+                <button type="button" onclick="window.removePhoto('${type}', ${index})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md hover:bg-red-600 transition-colors z-10">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            `;
+            listEl.insertBefore(div, btnEl);
+        });
+        
+        // Sembunyikan tombol tambah jika sudah 3
+        if (window.pendingPhotos[type].length >= 3) {
+            btnEl.style.display = 'none';
+        } else {
+            btnEl.style.display = 'flex';
+        }
+    }
+
+    window.removePhoto = function(type, index) {
+        window.pendingPhotos[type].splice(index, 1);
+        window.renderPhotoPreviews(type);
+    }
+    
+    window.resetPhotos = function(type) {
+        window.pendingPhotos[type] = [];
+        window.renderPhotoPreviews(type);
+    }
+
+    window.viewImage = function(src, caption) {
+        document.getElementById('full-image-view').src = src;
+        document.getElementById('full-image-caption').textContent = caption;
+        window.openModal('image-modal');
+    }
+
+    window.getCategoryColor = function(category) {
+        if(category.includes('Seiri')) return 'bg-red-100 text-red-800 border-red-200';
+        if(category.includes('Seiton')) return 'bg-orange-100 text-orange-800 border-orange-200';
+        if(category.includes('Seiso')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        if(category.includes('Seiketsu')) return 'bg-blue-100 text-blue-800 border-blue-200';
+        if(category.includes('Shitsuke')) return 'bg-purple-100 text-purple-800 border-purple-200';
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+
+    window.formatDate = function(dateString) {
+        if(!dateString) return '-';
+        const options = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' };
+        return new Date(dateString).toLocaleDateString('id-ID', options);
+    }
+
+    window.createFindingCard = function(item) {
+        const div = document.createElement('div');
+        div.className = "bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col animate-fade-in";
+        div.style.animation = "fadeIn 0.3s ease-out forwards";
+        
+        const catStyle = window.getCategoryColor(item.category);
+        let actionButtons = '';
+        
+        // Dukungan Backward Compatibility: Jika format lama berupa string 1 gambar, ubah jadi array
+        const beforePhotos = Array.isArray(item.photoBefore) ? item.photoBefore : [item.photoBefore];
+        
+        let beforePhotoHtml = beforePhotos.map((p, i) => `
+            <div class="w-20 h-20 flex-shrink-0 cursor-pointer" onclick="window.viewImage('${p}', 'Kondisi Sebelum - ${item.location} (${i+1}/${beforePhotos.length})')">
+                <img src="${p}" class="w-full h-full object-cover rounded-md border bg-gray-100 shadow-sm" alt="Temuan">
+            </div>
+        `).join('');
+
+        let photoSection = `
+            <div class="flex overflow-x-auto gap-2 pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 hide-scroll">
+                ${beforePhotoHtml}
+            </div>
+        `;
+
+        if (item.status === 'open') {
+            actionButtons = `
+                <div class="mt-3 pt-3 border-t flex justify-end">
+                    <button onclick="window.openCloseForm('${item.id}')" class="bg-green-50 text-green-600 border border-green-200 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-100 transition flex items-center shadow-sm">
+                        <i class="fa-solid fa-check-double mr-2"></i> Close Temuan
+                    </button>
+                </div>
+            `;
+        } else {
+            const afterPhotos = Array.isArray(item.photoAfter) ? item.photoAfter : (item.photoAfter ? [item.photoAfter] : []);
+            
+            let combinedBefore = beforePhotos.map((p, i) => `
+                <div class="w-20 h-20 flex-shrink-0 cursor-pointer relative" onclick="window.viewImage('${p}', 'Sebelum - ${item.location} (${i+1}/${beforePhotos.length})')">
+                    <span class="absolute bottom-0 left-0 bg-black bg-opacity-60 text-white text-[10px] px-1 rounded-tr">Sblm</span>
+                    <img src="${p}" class="w-full h-full object-cover rounded border border-red-200 bg-gray-100" alt="Sebelum">
+                </div>
+            `).join('');
+
+            let afterPhotoHtml = afterPhotos.map((p, i) => `
+                <div class="w-20 h-20 flex-shrink-0 cursor-pointer relative" onclick="window.viewImage('${p}', 'Sesudah - ${item.location} (${i+1}/${afterPhotos.length})')">
+                    <span class="absolute bottom-0 left-0 bg-green-600 text-white text-[10px] px-1 rounded-tr">Ssdh</span>
+                    <img src="${p}" class="w-full h-full object-cover rounded border border-green-300 bg-gray-100" alt="Sesudah">
+                </div>
+            `).join('');
+
+            photoSection = `
+                <div class="flex overflow-x-auto gap-2 pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 hide-scroll">
+                    ${combinedBefore}
+                    ${afterPhotoHtml}
+                </div>
+            `;
+            actionButtons = `
+                <div class="mt-2 pt-2 border-t text-sm text-gray-600 bg-gray-50 -mx-4 -mb-4 p-3 px-4">
+                    <p><span class="font-semibold text-green-700">Tindakan:</span> ${item.closeAction}</p>
+                    <p class="text-xs mt-1 text-gray-400">Closed: ${window.formatDate(item.closeDate)}</p>
+                </div>
+            `;
+        }
+
+        div.innerHTML = `
+            <div class="p-4 flex flex-col gap-3">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h3 class="font-bold text-gray-800 line-clamp-1">${item.location}</h3>
+                        <p class="text-xs text-gray-400 mt-1"><i class="fa-regular fa-clock"></i> ${window.formatDate(item.date)}</p>
+                    </div>
+                    <span class="text-[10px] px-2 py-1 rounded-md border ${catStyle} font-medium whitespace-nowrap ml-2">
+                        ${item.category.split(' ')[0]}
+                    </span>
+                </div>
+                <p class="text-gray-600 text-sm line-clamp-2">${item.description}</p>
+                ${photoSection}
+            </div>
+            <div class="px-4 pb-4">
+                ${actionButtons}
+            </div>
+        `;
+        return div;
+    }
+
+    window.renderFindings = function() {
+        if(!window.gembaState.isDataLoaded) return;
+
+        const listOpen = document.getElementById('list-open');
+        const listClosed = document.getElementById('list-closed');
+        const emptyState = document.getElementById('empty-state');
+        
+        listOpen.innerHTML = '';
+        listClosed.innerHTML = '';
+
+        let openCount = 0;
+        let closedCount = 0;
+
+        window.gembaState.findings.forEach(item => {
+            if (item.status === 'open') {
+                openCount++;
+                listOpen.appendChild(window.createFindingCard(item));
+            } else {
+                closedCount++;
+                listClosed.appendChild(window.createFindingCard(item));
+            }
+        });
+
+        document.getElementById('count-open').textContent = openCount;
+        document.getElementById('count-closed').textContent = closedCount;
+
+        if (window.gembaState.currentTab === 'resume') {
+            emptyState.classList.add('hidden');
+            window.renderResume();
+        } else if (window.gembaState.currentTab === 'open' && openCount === 0) {
+            emptyState.classList.remove('hidden');
+            listOpen.classList.add('hidden');
+        } else if (window.gembaState.currentTab === 'closed' && closedCount === 0) {
+            emptyState.classList.remove('hidden');
+            listClosed.classList.add('hidden');
+        } else {
+            emptyState.classList.add('hidden');
+        }
+    }
+
+    window.renderResume = function() {
+        const listResume = document.getElementById('list-resume');
+        const findings = window.gembaState.findings;
+        
+        const total = findings.length;
+        const open = findings.filter(f => f.status === 'open').length;
+        const closed = findings.filter(f => f.status === 'closed').length;
+        
+        const categories = [
+            { key: 'Seiri', label: 'Seiri (Ringkas)', color: 'bg-red-500' },
+            { key: 'Seiton', label: 'Seiton (Rapi)', color: 'bg-orange-500' },
+            { key: 'Seiso', label: 'Seiso (Resik)', color: 'bg-yellow-500' },
+            { key: 'Seiketsu', label: 'Seiketsu (Rawat)', color: 'bg-blue-500' },
+            { key: 'Shitsuke', label: 'Shitsuke (Rajin)', color: 'bg-purple-500' }
+        ];
+
+        let catHtml = '';
+        categories.forEach(cat => {
+            const catOpen = findings.filter(f => f.status === 'open' && f.category.includes(cat.key)).length;
+            const catClosed = findings.filter(f => f.status === 'closed' && f.category.includes(cat.key)).length;
+            const catTotal = catOpen + catClosed;
+            const pct = catTotal === 0 ? 0 : Math.round((catClosed / catTotal) * 100);
+
+            catHtml += `
+                <div class="bg-white p-3 rounded-lg border border-gray-100 shadow-sm mb-3 animate-fade-in">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-gray-700 text-sm">${cat.label}</span>
+                        <span class="text-xs font-semibold bg-gray-100 px-2 py-1 rounded">${catTotal} Temuan</span>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mb-1">
+                        <span>Open: <span class="font-bold text-red-500">${catOpen}</span></span>
+                        <span>Closed: <span class="font-bold text-green-500">${catClosed}</span></span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div class="${cat.color} h-2 rounded-full transition-all duration-1000" style="width: ${pct}%"></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        const completionRate = total === 0 ? 0 : Math.round((closed / total) * 100);
+
+        listResume.innerHTML = `
+            <div class="grid grid-cols-3 gap-2 mb-4 animate-fade-in">
+                <div class="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center">
+                    <p class="text-[10px] font-semibold uppercase text-gray-500 mb-1">Total</p>
+                    <p class="text-xl font-bold text-blue-600">${total}</p>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-red-100 shadow-sm text-center">
+                    <p class="text-[10px] font-semibold uppercase text-gray-500 mb-1">Terbuka</p>
+                    <p class="text-xl font-bold text-red-500">${open}</p>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-green-100 shadow-sm text-center">
+                    <p class="text-[10px] font-semibold uppercase text-gray-500 mb-1">Selesai</p>
+                    <p class="text-xl font-bold text-green-600">${closed}</p>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-4 animate-fade-in">
+                <h3 class="text-sm font-bold text-gray-800 mb-2">Completion Rate</h3>
+                <div class="flex items-center gap-3">
+                    <div class="flex-1 bg-gray-200 rounded-full h-3">
+                        <div class="bg-green-500 h-3 rounded-full transition-all duration-1000" style="width: ${completionRate}%"></div>
+                    </div>
+                    <span class="text-sm font-bold text-gray-700">${completionRate}%</span>
+                </div>
+            </div>
+
+            <h3 class="text-sm font-bold text-gray-800 mb-3 px-1">Rincian per Kategori 5R</h3>
+            ${catHtml}
+        `;
+    }
+
+    window.openCloseForm = function(id) {
+        const item = window.gembaState.findings.find(f => f.id === id);
+        if(!item) return;
+
+        document.getElementById('close-finding-id').value = id;
+        document.getElementById('close-summary-location').innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${item.location}`;
+        document.getElementById('close-summary-desc').textContent = `"${item.description}"`;
+        
+        window.openModal('close-modal');
+    }
+
+    window.shareApp = function() {
+        try {
+            // Cek apakah dijalankan dari file lokal (offline)
+            if (window.location.protocol === 'file:') {
+                window.showToast("Gagal Share: Aplikasi masih Offline. Harap upload/hosting file ini ke Internet!");
+                return;
+            }
+
+            const url = new URL(window.location.href);
+            // Dapatkan App ID agar link share menuju ke 'ruangan' data yang sama persis
+            const urlParams = new URLSearchParams(window.location.search);
+            const currentAppId = typeof __app_id !== 'undefined' ? __app_id : (urlParams.get('appId') || 'gemba-5r-default');
+            url.searchParams.set('appId', currentAppId);
+            
+            const shareUrl = url.toString();
+            
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                window.showToast("Link disalin! Buka link ini di PC/Tim Anda.");
+            }).catch(err => {
+                const input = document.createElement('input');
+                input.setAttribute('value', shareUrl);
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                document.body.removeChild(input);
+                window.showToast("Link disalin (Fallback).");
+            });
+        } catch(e) {
+            window.showToast("Gagal membuat link share.");
+        }
+    }
+
+    // Placeholder Function saat DB Loading (Akan ditimpa oleh Script Firebase di bawah)
+    window.handleFormSubmit = function(e) { e.preventDefault(); window.showToast("Menyambungkan ke Cloud, mohon tunggu..."); }
+    window.resetData = function() { window.showToast("Menyambungkan ke Cloud, mohon tunggu..."); }
+</script>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Memprioritaskan App ID dari URL link (hasil share)
+    const urlParams = new URLSearchParams(window.location.search);
+    const appId = urlParams.get('appId') || (typeof __app_id !== 'undefined' ? __app_id : 'gemba-5r-default');
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+    let app, auth, db;
+    let unsubscribeRealtime = null;
+    const getCollectionRef = () => collection(db, 'artifacts', appId, 'public', 'data', 'findings');
+
+    async function initFirebase() {
+        try {
+            if (Object.keys(firebaseConfig).length === 0) {
+                throw new Error("Konfigurasi database tidak ditemukan pada URL ini.");
+            }
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            document.getElementById('sync-status').classList.remove('hidden');
+            setupRealtimeListener();
+        } catch (error) {
+            console.error("Firebase init failed:", error);
+            window.showToast("Gagal terhubung ke database.");
+            document.getElementById('loading-state').innerHTML = `
+                <div class="flex flex-col items-center text-red-500">
+                    <i class="fa-solid fa-triangle-exclamation text-2xl mb-2"></i>
+                    <p class="text-sm font-bold">Koneksi Database Gagal</p>
+                    <p class="text-xs text-gray-500 mt-1">${error.message}</p>
+                </div>`;
+        }
+    }
+
+    function setupRealtimeListener() {
+        if (!auth.currentUser) return;
+        
+        // Fallback timeout jika koneksi internet terblokir (misal firewall kantor memblokir websocket)
+        const syncTimeout = setTimeout(() => {
+            if(!window.gembaState.isDataLoaded) {
+                document.getElementById('loading-state').innerHTML = `
+                    <div class="flex flex-col items-center text-gray-500">
+                        <i class="fa-solid fa-wifi text-red-400 text-2xl mb-2"></i>
+                        <p class="text-sm">Koneksi jaringan PC sangat lambat/terblokir.</p>
+                        <button onclick="window.location.reload()" class="mt-3 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-4 py-2 rounded-full font-bold transition-colors">Refresh Halaman</button>
+                    </div>`;
+            }
+        }, 10000);
+
+        unsubscribeRealtime = onSnapshot(getCollectionRef(), (snapshot) => {
+            clearTimeout(syncTimeout);
+            window.gembaState.findings = [];
+            snapshot.forEach((doc) => {
+                window.gembaState.findings.push({ id: doc.id, ...doc.data() });
+            });
+            
+            window.gembaState.isDataLoaded = true;
+            document.getElementById('loading-state').classList.add('hidden');
+            
+            window.gembaState.findings.sort((a, b) => new Date(b.date) - new Date(a.date));
+            window.renderFindings();
+        }, (error) => {
+            clearTimeout(syncTimeout);
+            console.error("Fetch error:", error);
+            window.showToast("Koneksi terputus.");
+            document.getElementById('loading-state').innerHTML = `<div class="text-red-500 text-sm text-center">Gagal memuat data: ${error.message}</div>`;
+        });
+    }
+
+    window.handleFormSubmit = async function(event, type) {
+        event.preventDefault();
+        if (!auth.currentUser) return;
+        
+        const submitBtn = document.getElementById(type === 'add' ? 'add-submit-btn' : 'close-submit-btn');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = `<div class="loader mr-2 border-white border-t-transparent w-5 h-5"></div> Menyimpan...`;
+        submitBtn.disabled = true;
+
+        try {
+            if (type === 'add') {
+                if(window.pendingPhotos.add.length === 0) {
+                    window.showToast("Harap tambahkan minimal 1 foto temuan!");
+                    throw new Error("Missing photo");
+                }
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'findings', Date.now().toString());
+                await setDoc(docRef, {
+                    location: document.getElementById('add-location').value,
+                    category: document.getElementById('add-category').value,
+                    description: document.getElementById('add-description').value,
+                    photoBefore: window.pendingPhotos.add, // Menyimpan array
+                    date: new Date().toISOString(),
+                    status: 'open', photoAfter: null, closeAction: null, closeDate: null
+                });
+                
+                window.closeModal('add-modal');
+                window.showToast("Temuan disimpan ke Cloud!");
+                if(window.gembaState.currentTab !== 'open') window.switchTab('open');
+
+            } else if (type === 'close') {
+                const id = document.getElementById('close-finding-id').value;
+                if(window.pendingPhotos.close.length === 0) {
+                    window.showToast("Harap tambahkan minimal 1 foto bukti perbaikan!");
+                    throw new Error("Missing photo");
+                }
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'findings', id);
+                await updateDoc(docRef, {
+                    status: 'closed',
+                    closeAction: document.getElementById('close-action').value,
+                    photoAfter: window.pendingPhotos.close, // Menyimpan array
+                    closeDate: new Date().toISOString()
+                });
+                
+                window.closeModal('close-modal');
+                window.showToast("Temuan di-close!");
+                window.switchTab('closed');
+            }
+        } catch (error) {
+            if(error.message !== "Missing photo") window.showToast("Gagal menyimpan data.");
+        } finally {
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    }
+
+    window.resetData = async function() {
+        if(confirm("PERINGATAN: Anda akan menghapus SEMUA data dari Cloud. Lanjutkan?")) {
+            if (!auth.currentUser) return;
+            window.showToast("Menghapus data...");
+            try {
+                const snapshot = await getDocs(getCollectionRef());
+                const deletePromises = [];
+                snapshot.forEach(docSnap => deletePromises.push(deleteDoc(docSnap.ref)));
+                await Promise.all(deletePromises);
+                window.showToast("Semua data dihapus dari Cloud.");
+            } catch (error) {
+                window.showToast("Gagal menghapus data.");
+            }
+        }
+    }
+
+    initFirebase();
+</script>
+
+<style>
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+</body>
+</html>
